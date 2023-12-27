@@ -71,10 +71,10 @@ const listContact = () => {
 // Detail COntact
 const detailContact = (nama) => {
   const contacts = loadContact();
-
   const contact = contacts.find(
     (contact) => contact.nama.toLowerCase() === nama.toLowerCase()
   );
+
   if (!contact) {
     console.log(chalk.red.inverse.bold(`${nama} tidak ditemukan !!`));
     return false;
