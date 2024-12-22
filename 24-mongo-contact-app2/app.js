@@ -1,23 +1,24 @@
 /** @format */
 const express = require("express");
 const expressLayouts = require("express-ejs-layouts");
-const {
-  loadContact,
-  findContact,
-  addContact,
-  cekDuplikat,
-  deleteContact,
-  updateContacts,
-} = require("./utils/contacts");
-const { check, body, validationResult } = require("express-validator");
-const session = require("express-session");
-const cookieParser = require("cookie-parser");
-const flash = require("connect-flash");
+
+const { body, validationResult, check } = require("express-validator");
+const methodOverride = require("method-override");
+
+require("./utils/db");
+const Contact = require("./model/contact");
 
 const app = express();
 const port = 3000;
 
-// Gunakan EJS
+// Flash
+const session = require("express-session");
+const cookieParser = require("cookie-parser");
+const flash = require("connect-flash");
+
+// Setup Method Override
+app.use(methodOverride("_method"));
+// Setup EJS
 app.set("view engine", "ejs");
 app.use(expressLayouts); // Third Party Middleware
 app.use(express.static("public")); // Built-in Middleware
@@ -35,12 +36,20 @@ app.use(
 );
 app.use(flash());
 
-// Route / Routing
+// Halaman Home
 app.get("/", (req, res) => {
   const mahasiswa = [
     {
       nama: "Naufal Harits",
       email: "naufal@gmail.com",
+    },
+    {
+      nama: "Erik Galih",
+      email: "erik@gmail.com",
+    },
+    {
+      nama: "Doddy Ferdiansyah",
+      email: "doddy@gmail.com",
     },
   ];
   res.render("index", {
@@ -51,6 +60,7 @@ app.get("/", (req, res) => {
   });
 });
 
+// Halaman About
 app.get("/about", (req, res) => {
   res.render("about", {
     title: "Halaman About",
@@ -58,9 +68,11 @@ app.get("/about", (req, res) => {
   });
 });
 
-app.get("/contact", (req, res) => {
-  const contacts = loadContact();
-  res.render("contact", { 
+// Halaman Contact
+app.get("/contact", async (req, res) => {
+  const contacts = await Contact.find();
+
+  res.render("contact", {
     title: "Halaman Contact",
     layout: "layouts/main-layout",
     contacts,
@@ -78,12 +90,10 @@ app.get("/contact/add", (req, res) => {
 
 //  Proses Tambah Data Contact
 app.post(
-  // Route
   "/contact/add",
-  // Validation
-  [   
-    body("nama").custom((value) => {
-      const duplikat = cekDuplikat(value);
+  [
+    body("nama").custom(async (value) => {
+      const duplikat = await Contact.findOne({ nama: value });
       if (duplikat) {
         throw new Error("Nama Contact Sudah Terdaftar !!!");
       }
@@ -93,17 +103,16 @@ app.post(
     check("nohp", "Nomer Handphone Tidak Valid").isMobilePhone("id-ID"),
   ],
   // Cek Error , Kalau Gak ada Add Contact
-  (req, res) => {
+  async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      // return res.status(400).json({ errors: errors.array() });
       res.render("add-contact", {
         title: "Form Tambah Data Contact",
         layout: "layouts/main-layout",
         errors: errors.array(),
       });
     } else {
-      addContact(req.body);
+      await Contact.insertMany(req.body);
       // Kirimkan Flash Messages
       req.flash("msg", "Data Contact Berhasil Di Tambahkan");
       res.redirect("/contact");
@@ -112,22 +121,29 @@ app.post(
 );
 
 // Hapus Contact
-app.get("/contact/delete/:nama", (req, res) => {
-  const contact = findContact(req.params.nama);
-  // jika contact tidak ada
-  if (!contact) {
-    res.status(404);
-    res.send("<h1>404</h1>");
-  } else {
-    deleteContact(req.params.nama);
+// app.get("/contact/delete/:nama", async (req, res) => {
+//   const contact = await Contact.findOne({ nama: req.params.nama });
+//   // jika contact tidak ada
+//   if (!contact) {
+//     res.status(404);
+//     res.send("<h1>404</h1>");
+//   } else {
+//     Contact.deleteOne({ _id: contact._id }).then((result) => {
+//       req.flash("msg", "Data Contact Berhasil Di HAPUS !!");
+//       res.redirect("/contact");
+//     });
+//   }
+// });
+app.delete("/contact", (req, res) => {
+  Contact.deleteOne({ nama: req.body.nama }).then((result) => {
     req.flash("msg", "Data Contact Berhasil Di HAPUS !!");
     res.redirect("/contact");
-  }
+  });
 });
 
 // halaman Form Ubah Data Contact
-app.get("/contact/edit/:nama", (req, res) => {
-  const contact = findContact(req.params.nama);
+app.get("/contact/edit/:nama", async (req, res) => {
+  const contact = await Contact.findOne({ nama: req.params.nama });
   res.render("edit-contact", {
     title: "Form Ubah Data Contact",
     layout: "layouts/main-layout",
@@ -136,13 +152,13 @@ app.get("/contact/edit/:nama", (req, res) => {
 });
 
 // Proses Ubah Data
-app.post(
+app.put(
   // Route
-  "/contact/update",
+  "/contact",
   // Validation
   [
-    body("nama").custom((value, { req }) => {
-      const duplikat = cekDuplikat(value);
+    body("nama").custom(async (value, { req }) => {
+      const duplikat = await Contact.findOne({ nama: value });
       if (value !== req.body.oldNama && duplikat) {
         throw new Error("Nama Contact Sudah Terdaftar !!!");
       }
@@ -155,7 +171,6 @@ app.post(
   (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      // return res.status(400).json({ errors: errors.array() });
       res.render("edit-contact", {
         title: "Form Ubah Data Contact",
         layout: "layouts/main-layout",
@@ -163,17 +178,29 @@ app.post(
         contact: req.body,
       });
     } else {
-      updateContacts(req.body);
-      // Kirimkan Flash Messages
-      req.flash("msg", "Data Contact Berhasil Di Ubah !!");
-      res.redirect("/contact");
+      Contact.updateOne(
+        { _id: req.body._id },
+        {
+          $set: {
+            nama: req.body.nama,
+            email: req.body.email,
+            nohp: req.body.nohp,
+          },
+        }
+      ).then((result) => {
+        // Kirimkan Flash Messages
+        req.flash("msg", "Data Contact Berhasil Di Ubah !!");
+        res.redirect("/contact");
+      });
     }
   }
 );
 
 // Halaman Detail Contact
-app.get("/contact/:nama", (req, res) => {
-  const contact = findContact(req.params.nama);
+app.get("/contact/:nama", async (req, res) => {
+  //   const contact = findContact(req.params.nama);
+  const contact = await Contact.findOne({ nama: req.params.nama });
+
   res.render("detail", {
     title: "Halaman Detail Contact",
     layout: "layouts/main-layout",
@@ -181,11 +208,6 @@ app.get("/contact/:nama", (req, res) => {
   });
 });
 
-app.use((req, res) => {
-  res.status(404);
-  res.send("<h1>Not Found 404....</h1>");
-});
-
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+  console.log(`Mongo Contact App | listening at http://localhost:${port}`);
 });
